@@ -5,12 +5,13 @@
 #' @param Ds Integer vector. Deviation values
 #' @param Vs Numeric vector. Variance values
 #' @param jss Integer vector. Sensitivity thresholds
-#' 
+#' @param Vmins Numeric vector. Variances of the stacked matrix for large counts
+#'   (NULL = no stacked matrix, NA = scenario without stacked matrix)
 #' @return data.frame of parameter combinations
 #' @export
 #' @examples
 #' build_parameters_table(c(10,15), c(10,20), js = 5)
-build_parameters_table <- function(Ds, Vs, jss = 0){
+build_parameters_table <- function(Ds, Vs, jss = 0, Vmins=NULL){
 
   assertthat::assert_that(
     is.numeric(Ds) && all(Ds > 0),
@@ -32,13 +33,17 @@ build_parameters_table <- function(Ds, Vs, jss = 0){
     all(Ds %% 1 == 0),
     msg = "Ds must be an integer vector."
   )
-  
-  expand.grid(
-    D = Ds,
-    V = Vs,
-    js = jss,
-    stringsAsFactors = FALSE,
-    KEEP.OUT.ATTRS = FALSE
+  assertthat::assert_that(
+    is.null(Vmins) || (is.numeric(Vmins) && all(is.na(Vmins) | Vmins > 0)),
+    msg = "Vmins must be NULL or a numeric vector with strictly positive values (or NA)."
+  )
+
+  grid_args <- list(D = Ds, V = Vs, js = jss)
+  if (!is.null(Vmins)) grid_args$Vmin <- Vmins
+
+  do.call(
+    expand.grid,
+    c(grid_args, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
   ) |>
     as.data.frame()
 

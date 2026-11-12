@@ -1,4 +1,4 @@
-check_inputs_RU <- function(df, cat_vars, hrc_vars, D, V, js, confident, gv, pv) {
+check_inputs_RU <- function(df, cat_vars, hrc_vars, D, V, js, confident, gv, pv, Vmin=NULL) {
   assertthat::assert_that(
     is.data.frame(df),
     msg = "The input data must be a data frame."
@@ -34,6 +34,10 @@ check_inputs_RU <- function(df, cat_vars, hrc_vars, D, V, js, confident, gv, pv)
   assertthat::assert_that(
     is.numeric(pv) && length(pv) == 1 && pv > 0,
     msg = "The parameter pv must be a positive numeric value."
+  )
+  assertthat::assert_that(
+    is.null(Vmin) || (is.numeric(Vmin) && length(Vmin) == 1 && Vmin > 0),
+    msg = "The parameter Vmin must be NULL or a positive numeric value."
   )
 }
 
@@ -82,28 +86,43 @@ assess_RU <- function(
     hrc_vars = NULL,
     D,
     V,
+    Vmin= NULL,
     js,
     confident,
     gv = 50,
     pv = 20,
     seed  = NULL
 ){
-  check_inputs_RU(df, cat_vars, hrc_vars, D, V, js, confident, gv, pv)
+  check_inputs_RU(df, cat_vars, hrc_vars, D, V, js, confident, gv, pv, Vmin = Vmin)
 
   if (!is.null(seed)) set.seed(seed)
 
   I = 1:(confident - 1)
   J = js + 1
 
-  res <- df |>
-    build_individual_keys() |>
-    tabulate_and_apply_ckm(
-      cat_vars = cat_vars,
-      hrc_vars = hrc_vars,
-      D = D, V = V, js = js,
-      I = I,
-      J = J
-    )
+  if(is.null(Vmin)){
+    res <- df |>
+      build_individual_keys() |>
+      tabulate_and_apply_ckm(
+        cat_vars = cat_vars,
+        hrc_vars = hrc_vars,
+        D = D, V = V, js = js,
+        I = I,
+        J = J
+      )
+  }else{
+
+    res <- df |>
+      build_individual_keys() |>
+      tabulate_and_apply_ckm(
+        cat_vars = cat_vars,
+        hrc_vars = hrc_vars,
+        D = D, V = V, js = js,
+        I = I,
+        J = J, stack = list(D = D, V = Vmin)
+      )
+    }
+
 
   quantile_df <- function(x, probs = c(0.5, 0.80, 0.90, 0.95, 1)) {
     tibble(
@@ -126,10 +145,21 @@ assess_RU <- function(
     dplyr::reframe(quantile_df(abs(nb_obs-nb_obs_ckm))) |>
     tidyr::pivot_wider(names_from = quant, values_from = val, names_prefix = "MAD_pv_q")
 
-  return(
+  dt<- if(is.null(Vmin)){
     data.frame(
       D = D, V = V, js = js
-    ) |>
+    )
+  }else{  data.frame(
+    D = D, V = V,Vmin=Vmin, js = js
+  )}
+
+
+
+
+  return(
+
+
+    dt|>
       dplyr::bind_cols(res$risque |> dplyr::filter(i == paste0(I, collapse = ", "))) |>
       dplyr::bind_cols(res$utilite) |>
       dplyr::mutate(MAD_gv = MAD_gv, RMAD_gv = RMAD_gv, HD_gv = HD_gv) |>
@@ -146,6 +176,8 @@ assess_RU <- function(
 #'
 #' @inheritParams assess_RU
 #' @param parametres data.frame. Parameter combinations to test with columns D, V, js
+#'   and optionally Vmin (variance of the stacked matrix for large counts;
+#'   NA = no stacked matrix)
 #'
 #' @return data.frame with nrow(parametres) rows containing risk and utility measures
 #'
@@ -196,7 +228,10 @@ assess_RUs <- function(
 
   purrr::pmap(
     parametres,
-    \(D,V,js){
+    \(D,V,js,Vmin=NULL){
+
+      # Vmin column absent or NA -> no stacked matrix
+      if (!is.null(Vmin) && is.na(Vmin)) Vmin <- NULL
 
       if(!is.null(seed)) set.seed(seed)
 
@@ -204,7 +239,7 @@ assess_RUs <- function(
         df = df,
         cat_vars = cat_vars,
         hrc_vars = hrc_vars,
-        D = D, V = V, js = js,
+        D = D, V = V, Vmin = Vmin, js = js,
         confident = confident,
         gv = gv,
         pv = pv,
@@ -316,7 +351,9 @@ simulate_RUs <- function(
 
   res_sims <- purrr::pmap(
     parametres,
-    \(D, V, js){
+    \(D, V, js, Vmin = NULL){
+
+      if (!is.null(Vmin) && is.na(Vmin)) Vmin <- NULL
 
       min_size_workers <- as.numeric(object.size(df)) + 0.2*1024^3
       min_size_workers <- if(is.null(size_workers)) min_size_workers else if(size_workers <= min_size_workers) min_size_workers else size_workers*1024^3
@@ -351,7 +388,7 @@ simulate_RUs <- function(
                 df = df,
                 cat_vars = cat_vars,
                 hrc_vars = hrc_vars,
-                D = D, V = V, js = js,
+                D = D, V = V, Vmin = Vmin, js = js,
                 confident = confident,
                 gv = gv,
                 pv = pv,
